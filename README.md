@@ -1,2 +1,2 @@
 # odoo-sh-devel
-Odoo SD Development Repository
+Odoo.sh Development Repository
