@@ -352,6 +352,16 @@ class AccountInvoice(models.Model):
             taxes_total = -taxes['total_excluded']
         else:
             taxes_total = taxes['total_excluded']
+        taxes_amount = taxes['taxes'][0]['amount']
+        if (self.currency_id !=
+                self.company_id.currency_id):
+            taxes_total = self.currency_id.with_context(
+                date=self._get_currency_rate_date()).compute(
+                    taxes_total, self.company_id.currency_id)
+            taxes_amount = self.currency_id.with_context(
+                date=self._get_currency_rate_date()).compute(
+                    taxes['taxes'][0]['amount'],
+                    self.company_id.currency_id)
         tax_sii = {
             "TipoImpositivo": tax_type,
             "BaseImponible": taxes_total
@@ -363,9 +373,9 @@ class AccountInvoice(models.Model):
             tax_sii['CuotaRecargoEquivalencia'] = cuota_recargo
 
         if self.type in ['out_invoice', 'out_refund']:
-            tax_sii['CuotaRepercutida'] = taxes['taxes'][0]['amount']
+            tax_sii['CuotaRepercutida'] = taxes_amount
         if self.type in ['in_invoice', 'in_refund']:
-            tax_sii['CuotaSoportada'] = taxes['taxes'][0]['amount']
+            tax_sii['CuotaSoportada'] = taxes_amount
         return tax_sii
 
     @api.multi
@@ -385,13 +395,21 @@ class AccountInvoice(models.Model):
             taxes_total = -taxes['total_excluded']
         else:
             taxes_total = taxes['total_excluded']
+        taxes_amount = taxes['taxes'][0]['amount']
+        if (self.currency_id !=
+                self.company_id.currency_id):
+            taxes_total = self.currency_id.with_context(
+                date=self._get_currency_rate_date()).compute(
+                    taxes_total, self.company_id.currency_id)
+            taxes_amount = self.currency_id.with_context(
+                date=self._get_currency_rate_date()).compute(
+                    taxes['taxes'][0]['amount'],
+                    self.company_id.currency_id)
         tax_sii[str(tax_type)]['BaseImponible'] += taxes_total
         if self.type in ['out_invoice', 'out_refund']:
-            tax_sii[str(tax_type)]['CuotaRepercutida'] += \
-                taxes['taxes'][0]['amount']
+            tax_sii[str(tax_type)]['CuotaRepercutida'] += taxes_amount
         if self.type in ['in_invoice', 'in_refund']:
-            tax_sii[str(tax_type)]['CuotaSoportada'] += \
-                taxes['taxes'][0]['amount']
+            tax_sii[str(tax_type)]['CuotaSoportada'] += taxes_amount
         return tax_sii
 
     @api.multi
@@ -426,15 +444,22 @@ class AccountInvoice(models.Model):
                         # TODO l10n_es no tiene impuesto exento de bienes
                         # corrientes nacionales
                         if tax_line in taxes_sfesbe:
+                            price_subtotal = line.price_subtotal
+                            if (self.currency_id !=
+                                    self.company_id.currency_id):
+                                price_subtotal = self.currency_id.with_context(
+                                    date=self._get_currency_rate_date(
+                                        )).compute(price_subtotal,
+                                                   self.company_id.currency_id)
                             if 'Exenta' not in inv_breakdown['Sujeta']:
                                 inv_breakdown['Sujeta']['Exenta'] = {}
                                 inv_breakdown['Sujeta']['Exenta'][
                                     'DetalleExenta'] = {
-                                        'BaseImponible': line.price_subtotal}
+                                        'BaseImponible': price_subtotal}
                             else:
                                 inv_breakdown['Sujeta']['Exenta'][
                                     'DetalleExenta'][
-                                        'BaseImponible'] += line.price_subtotal
+                                        'BaseImponible'] += price_subtotal
 
                         if tax_line in taxes_sfesb or \
                                 tax_line in taxes_sfesisp:
@@ -485,13 +510,25 @@ class AccountInvoice(models.Model):
                     if tax_line in taxes_sfens or tax_line in taxes_sfesns:
                         if 'NoSujeta' not in type_breakdown:
                             type_breakdown[op_key]['NoSujeta'] = {}
-                            type_breakdown[op_key]['NoSujeta'][
-                                'ImportePorArticulos7_14_Otros'] = \
-                                line.price_subtotal
+                            if self.registration_key.code == '08' and \
+                                    self.registration_key.type == 'sale':
+                                type_breakdown[op_key]['NoSujeta'][
+                                    'ImporteTAIReglasLocalizacion'] = \
+                                    line.price_subtotal
+                            else:
+                                type_breakdown[op_key]['NoSujeta'][
+                                    'ImportePorArticulos7_14_Otros'] = \
+                                    line.price_subtotal
                         else:
-                            type_breakdown[op_key]['NoSujeta'][
-                                'ImportePorArticulos7_14_Otros'] += \
-                                line.price_subtotal
+                            if self.registration_key.code == '08' and \
+                                    self.registration_key.type == 'sale':
+                                type_breakdown[op_key]['NoSujeta'][
+                                    'ImporteTAIReglasLocalizacion'] += \
+                                    line.price_subtotal
+                            else:
+                                type_breakdown[op_key]['NoSujeta'][
+                                    'ImportePorArticulos7_14_Otros'] += \
+                                    line.price_subtotal
                     else:
                         if 'Sujeta' not in type_breakdown[op_key]:
                             type_breakdown[op_key]['Sujeta'] = {}
@@ -502,6 +539,12 @@ class AccountInvoice(models.Model):
                             price_subtotal = -line.price_subtotal
                         else:
                             price_subtotal = line.price_subtotal
+                        if (self.currency_id !=
+                                self.company_id.currency_id):
+                            price_subtotal = self.currency_id.with_context(
+                                date=self._get_currency_rate_date(
+                                    )).compute(price_subtotal,
+                                               self.company_id.currency_id)
                         if 'Exenta' not in type_breakdown[op_key]['Sujeta']:
                             type_breakdown[op_key]['Sujeta']['Exenta'] = {}
                             type_breakdown[op_key]['Sujeta']['Exenta'][
@@ -590,7 +633,31 @@ class AccountInvoice(models.Model):
                 taxes_sii['DesgloseTipoOperacion']['PrestacionServicios'][
                     'Sujeta']['NoExenta']['DesgloseIVA'][
                     'DetalleIVA'].append(line)
-
+        if 'DesgloseTipoOperacion' in taxes_sii:
+            if 'Entrega' in taxes_sii['DesgloseTipoOperacion']:
+                if 'Sujeta' in taxes_sii['DesgloseTipoOperacion']['Entrega']:
+                    if 'Exenta' in taxes_sii['DesgloseTipoOperacion'][
+                            'Entrega']['Sujeta']:
+                        if 'DetalleExenta' in taxes_sii[
+                            'DesgloseTipoOperacion']['Entrega']['Sujeta'][
+                                'Exenta']:
+                            if 'BaseImponible' in taxes_sii[
+                                'DesgloseTipoOperacion']['Entrega']['Sujeta'][
+                                    'Exenta']['DetalleExenta']:
+                                taxes_sii[
+                                'DesgloseTipoOperacion']['Entrega']['Sujeta'][
+                                    'Exenta']['DetalleExenta'][
+                                        'BaseImponible'] = round(taxes_sii[
+                                            'DesgloseTipoOperacion']['Entrega'][
+                                                'Sujeta']['Exenta'][
+                                                    'DetalleExenta'][
+                                                        'BaseImponible'], 2
+                                            )
+        if 'DesgloseTipoOperacion' in taxes_sii and \
+                'DesgloseFactura' in taxes_sii:
+            taxes_sii['DesgloseTipoOperacion']['Entrega'] = \
+                taxes_sii['DesgloseFactura']
+            del taxes_sii['DesgloseFactura']
         return taxes_sii
 
     @api.multi
@@ -639,8 +706,8 @@ class AccountInvoice(models.Model):
                     if line.get('CuotaSoportada', False):
                         line['CuotaSoportada'] = \
                             -round(line['CuotaSoportada'], 2)
-                        line['BaseImponible'] = -round(
-                            line['BaseImponible'], 2)
+                    line['BaseImponible'] = -round(
+                        line['BaseImponible'], 2)
                 else:
                     if line.get('CuotaRecargoEquivalencia', False):
                         line['CuotaRecargoEquivalencia'] = \
@@ -648,7 +715,7 @@ class AccountInvoice(models.Model):
                     if line.get('CuotaSoportada', False):
                         line['CuotaSoportada'] = \
                             abs(round(line['CuotaSoportada'], 2))
-                        line['BaseImponible'] = round(line['BaseImponible'], 2)
+                    line['BaseImponible'] = round(line['BaseImponible'], 2)
                 if line.get('TipoImpositivo', False):
                     line['TipoImpositivo'] = round(line['TipoImpositivo'], 2)
                 taxes_sii['DesgloseIVA']['DetalleIVA'].append(line)
@@ -722,6 +789,12 @@ class AccountInvoice(models.Model):
                     importe_total = -abs(self.amount_total)
             else:
                 importe_total = self.amount_total
+            if (self.currency_id !=
+                    self.company_id.currency_id):
+                importe_total = self.currency_id.with_context(
+                    date=self._get_currency_rate_date(
+                        )).compute(importe_total,
+                                   self.company_id.currency_id)
             invoices = {
                 "IDFactura": {
                     "IDEmisorFactura": {
@@ -919,6 +992,7 @@ class AccountInvoice(models.Model):
                 if res['EstadoEnvio'] in ['Correcto', 'ParcialmenteCorrecto']:
                     self.sii_sent = True
                     self.sii_resend = False
+                    self.sii_cancel = False
                     self.sii_csv = res['CSV']
                     if 'FechaRegContable' in invoices:
                         if not self.sii_registration_date:
@@ -1145,6 +1219,7 @@ class AccountInvoice(models.Model):
 
     @api.multi
     def drop_sii(self):
+        queue_obj = self.env['queue.job'].sudo()
         for invoice in self:
             company = invoice.company_id
             if company.sii_enabled:
@@ -1179,6 +1254,7 @@ class AccountInvoice(models.Model):
                 number = invoice.reference and \
                     invoice.reference[0:60]
                 id_emisor = self._get_sii_identifier()
+                id_emisor['NombreRazon'] = self.partner_id.name
             header = invoice._get_header(False, sii_map)
             ejercicio = fields.Date.from_string(
                 self.date_invoice).year
@@ -1285,6 +1361,11 @@ class AccountInvoice(models.Model):
     @api.multi
     def check_one_invoice(self):
         self._check_invoice()
+
+    @job
+    @api.multi
+    def drop_one_invoice(self):
+        self._drop_invoice()
 
     @job
     @api.multi
