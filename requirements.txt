@@ -8,3 +8,6 @@ unidecode
 xmlsig
 zeep
 xmlsec
+xlsxwriter
+xlrd
+fdfgen
